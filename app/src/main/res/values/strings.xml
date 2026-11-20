@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">اصحى واحسب</string>
+    <string name="alarm_channel_name">تنبيهات المنبّه الذكي</string>
+    <string name="alarm_channel_description">قناة رنين المنبّه عالية الأولوية لعرض تحدي الرياضيات فوق شاشة القفل.</string>
+    <string name="alarm_ringing_title">حان وقت الاستيقاظ</string>
+    <string name="alarm_ringing_subtitle">حل مسألة الرياضيات لإيقاف المنبّه</string>
+</resources>

@@ -7,6 +7,7 @@ import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -481,6 +482,9 @@ private fun AlarmEditorBottomSheet(
     var vibrate by remember { mutableStateOf(initialAlarm?.vibrate ?: true) }
     var gradualVolume by remember { mutableStateOf(initialAlarm?.gradualVolume ?: true) }
     var ringtoneUri by remember { mutableStateOf(initialAlarm?.ringtoneUri) }
+    var ringtoneDisplayName by remember(ringtoneUri) {
+        mutableStateOf(resolveRingtoneLabel(context, ringtoneUri))
+    }
 
     val ringtonePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -493,6 +497,22 @@ private fun AlarmEditorBottomSheet(
                 result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
             }
             ringtoneUri = picked?.toString()
+            ringtoneDisplayName = resolveRingtoneLabel(context, ringtoneUri)
+        }
+    }
+
+    val customAudioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            ringtoneUri = uri.toString()
+            ringtoneDisplayName = resolveRingtoneLabel(context, ringtoneUri)
         }
     }
 
@@ -616,27 +636,41 @@ private fun AlarmEditorBottomSheet(
                 }
             }
 
-            // اختيار نغمة الرنين
-            OutlinedButton(
-                onClick = {
-                    val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "اختر نغمة المنبّه")
-                        putExtra(
-                            RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
-                            ringtoneUri?.let { Uri.parse(it) }
-                        )
-                    }
-                    ringtonePickerLauncher.launch(intent)
-                },
-                modifier = Modifier.fillMaxWidth()
+            // اختيار نغمة الرنين (من النظام أو ملف صوتي خاص من الهاتف)
+            Text("نغمة المنبّه: $ringtoneDisplayName", color = MutedText, fontSize = 13.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.MusicNote, contentDescription = null, tint = DawnAmber)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(
-                    text = if (ringtoneUri != null) "تم اختيار نغمة مخصصة" else "نغمة النظام الافتراضية للمنبّه",
-                    color = SoftText
-                )
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+                            putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "اختر نغمة المنبّه")
+                            putExtra(
+                                RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
+                                ringtoneUri?.let { Uri.parse(it) }
+                            )
+                        }
+                        ringtonePickerLauncher.launch(intent)
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = DawnAmber, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.size(6.dp))
+                    Text("نغمات النظام", color = SoftText, fontSize = 12.sp)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        customAudioLauncher.launch(arrayOf("audio/*"))
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = DawnAmber, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.size(6.dp))
+                    Text("ملف من جهازي", color = SoftText, fontSize = 12.sp)
+                }
             }
 
             Row(
@@ -808,4 +842,28 @@ private fun formatDaysSummary(mask: Int): String {
     return ordered
         .filter { (calDay, _) -> (mask and (1 shl (calDay - 1))) != 0 }
         .joinToString("، ") { it.second }
+}
+
+private fun resolveRingtoneLabel(context: android.content.Context, uriString: String?): String {
+    if (uriString.isNullOrBlank()) return "نغمة النظام الافتراضية"
+    val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return "نغمة مخصصة"
+
+    // أولاً محاولة جلب اسم الملف إذا كان مختاراً من وحدة التخزين
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        val name = cursor.getString(idx)
+                        if (!name.isNullOrBlank()) return name
+                    }
+                }
+            }
+    }
+
+    // ثانياً جلب عنوان النغمة من RingtoneManager
+    return runCatching {
+        RingtoneManager.getRingtone(context, uri)?.getTitle(context)?.takeIf { it.isNotBlank() }
+    }.getOrNull() ?: "نغمة مخصصة"
 }
